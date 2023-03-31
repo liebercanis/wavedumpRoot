@@ -1545,159 +1545,167 @@ void CheckKeyboardCommands(int handle, WaveDumpRun_t *WDrun, WaveDumpConfig_t *W
 */
 int WriteOutputFiles(WaveDumpConfig_t *WDcfg, WaveDumpRun_t *WDrun, CAEN_DGTZ_EventInfo_t *EventInfo, void *Event)
 {
-    int ch, j, ns;
-    char   dateTag[10];
-    char   hourTag[3];
-    time_t rawtime;
-    time ( &rawtime );
-    struct tm *timeinfo;
-    int chan = 0;
+  int ch, j, ns;
+  char   dateTag[10];
+  char   hourTag[3];
+  time_t rawtime;
+  time ( &rawtime );
+  struct tm *timeinfo;
+  int chan = 0;
 
-    CAEN_DGTZ_UINT16_EVENT_t  *Event16 = NULL;
-    CAEN_DGTZ_UINT8_EVENT_t   *Event8 = NULL;
+  CAEN_DGTZ_UINT16_EVENT_t  *Event16 = NULL;
+  CAEN_DGTZ_UINT8_EVENT_t   *Event8 = NULL;
 
-    if (WDcfg->Nbit == 8)
-        Event8 = (CAEN_DGTZ_UINT8_EVENT_t *)Event;
-    else
-        Event16 = (CAEN_DGTZ_UINT16_EVENT_t *)Event;
+  if (WDcfg->Nbit == 8)
+    Event8 = (CAEN_DGTZ_UINT8_EVENT_t *)Event;
+  else
+    Event16 = (CAEN_DGTZ_UINT16_EVENT_t *)Event;
 
-    for (ch = 0; ch < WDcfg->Nch; ch++) {
-        int Size = (WDcfg->Nbit == 8) ? Event8->ChSize[ch] : Event16->ChSize[ch];
-        if (Size <= 0) {
-            continue;
-        }
-        // First check to see if we are writing root files
-        if (WDrun->ContinuousRootWrite) {
+  // event timestamp
+  timeinfo = localtime (&rawtime );
+  TTimeStamp tstamp(mktime(timeinfo));
 
-            if (!WDrun->foutRoot) {  // if no root file open, then open a new one as run-mm-dd-yyyy-file#.root
-                timeinfo = localtime ( &rawtime );
-                strftime(dateTag, 11,"%m_%d_%Y",timeinfo);
-                TString fullname = (Form("rootData/run-%s-file.root",dateTag));
-                WDrun->foutRoot = new TFile(fullname, "recreate");
-                printf("opened output file %s \n", WDrun->foutRoot->GetName());
-		        rawRun = new TBRawRun(dateTag);
-                rawRun->btree->SetMaxTreeSize(10000000000);
-//                rawRun->btree->SetAutoFlush(100);
-            }
-            // output tree rawEvent contains branches for each channel
-            
-            rawEvent = rawRun->getDet(ch); // If channel branch doesn't exist getDet calls addDet
-            rawEvent->clear();
+  // open output file 
+  if (!WDrun->foutRoot) {  // if no root file open, then open a new one as run-mm-dd-yyyy-file#.root
+    strftime(dateTag, 11,"%m_%d_%Y",timeinfo);
+    TString fullname = (Form("rootData/run-%s-file.root",dateTag));
+    WDrun->foutRoot = new TFile(fullname, "recreate");
+    printf("opened output file %s \n", WDrun->foutRoot->GetName());
+    rawRun = new TBRawRun(dateTag);
+    rawRun->btree->SetMaxTreeSize(10000000000);
+    // rawRun->btree->SetAutoFlush(100);
+  }
 
-            // Set maximum tree size to 10Gb
-            rawEvent->channel = ch;
-            //rawEvent->eventTime = timeinfo;
-            rawEvent->trigger = EventInfo->EventCounter;
-            rawEvent->time = EventInfo->TriggerTimeTag;
+  rawRun->updateTime(tstamp);
 
-            wave.clear();
-            wave.resize(Size);
-
-            if (chan >= hChan.size()) {
-                TString hname;
-                TString htitle;
-                hname.Form("channel%i", ch);
-                htitle.Form("Channel %i", ch);
-                hChan.push_back(new TH1D(hname, htitle, Size, 1, Size));
-            }
-
-
-            for(j=0; j<Size; j++) {
-                if (WDcfg->Nbit == 8)
-                    wave[j] = Event8->DataChannel[ch][j];
-                else  {
-                    wave[j] = Event16->DataChannel[ch][j]; 
-                }
-                // Use baselines from the digitizer eventually 
-                hChan[chan]->AddBinContent(j + 1, double(wave[j]));
-            }
-            rawEvent->rdigi = wave;
-
-
-/// End of fill root tree
-
-        } else {
-            // Check the file format type
-            if( WDcfg->OutFileFlags& OFF_BINARY) {
-                // Binary file format
-                uint32_t BinHeader[6];
-                BinHeader[0] = (WDcfg->Nbit == 8) ? Size + 6*sizeof(*BinHeader) : Size*2 + 6*sizeof(*BinHeader);
-                BinHeader[1] = EventInfo->BoardId;
-                BinHeader[2] = EventInfo->Pattern;
-                BinHeader[3] = ch;
-                BinHeader[4] = EventInfo->EventCounter;
-                BinHeader[5] = EventInfo->TriggerTimeTag;
-                if (!WDrun->fout[ch]) {
-                    char fname[100];
-                    sprintf(fname, "%swave%d.dat", path,ch);
-                    if ((WDrun->fout[ch] = fopen(fname, "wb")) == NULL)
-                        return -1;
-                }
-                if( WDcfg->OutFileFlags & OFF_HEADER) {
-                    // Write the Channel Header
-                    if(fwrite(BinHeader, sizeof(*BinHeader), 6, WDrun->fout[ch]) != 6) {
-                        // error writing to file
-                        fclose(WDrun->fout[ch]);
-                        WDrun->fout[ch]= NULL;
-                        return -1;
-                    }
-                }
-                if (WDcfg->Nbit == 8)
-                    ns = (int)fwrite(Event8->DataChannel[ch], 1, Size, WDrun->fout[ch]);
-                else
-                    ns = (int)fwrite(Event16->DataChannel[ch] , 1 , Size*2, WDrun->fout[ch]) / 2;
-                if (ns != Size) {
-                    // error writing to file
-                    fclose(WDrun->fout[ch]);
-                    WDrun->fout[ch]= NULL;
-                    return -1;
-                }
-            } else {
-                // Ascii file format
-                if (!WDrun->fout[ch]) {
-                    char fname[100];
-                    sprintf(fname, "%swave%d.txt", path, ch);
-                    if ((WDrun->fout[ch] = fopen(fname, "w")) == NULL)
-                        return -1;
-                }
-                if( WDcfg->OutFileFlags & OFF_HEADER) {
-                    // Write the Channel Header
-                    fprintf(WDrun->fout[ch], "Record Length: %d\n", Size);
-                    fprintf(WDrun->fout[ch], "BoardID: %2d\n", EventInfo->BoardId);
-                    fprintf(WDrun->fout[ch], "Channel: %d\n", ch);
-                    fprintf(WDrun->fout[ch], "Event Number: %d\n", EventInfo->EventCounter);
-                    fprintf(WDrun->fout[ch], "Pattern: 0x%04X\n", EventInfo->Pattern & 0xFFFF);
-                    fprintf(WDrun->fout[ch], "Trigger Time Stamp: %u\n", EventInfo->TriggerTimeTag);
-                    fprintf(WDrun->fout[ch], "DC offset (DAC): 0x%04X\n", WDcfg->DCoffset[ch] & 0xFFFF);
-                }
-                for(j=0; j<Size; j++) {
-                    if (WDcfg->Nbit == 8)
-                        fprintf(WDrun->fout[ch], "%d\n", Event8->DataChannel[ch][j]);
-                    else
-                        fprintf(WDrun->fout[ch], "%d\n", Event16->DataChannel[ch][j]);
-                }
-            }
-            if (WDrun->SingleWrite) {
-                fclose(WDrun->fout[ch]);
-                WDrun->fout[ch]= NULL;
-            }
-        }
-	    chan++;
+  // loop over channels
+  for (ch = 0; ch < WDcfg->Nch; ch++) {
+    int Size = (WDcfg->Nbit == 8) ? Event8->ChSize[ch] : Event16->ChSize[ch];
+    if (Size <= 0) {
+      continue;
     }
-    if (WDrun->foutRoot) {
-        rawRun->fill();
+    // First check to see if we are writing root files
+    if (WDrun->ContinuousRootWrite) {
+
+      // output tree rawEvent contains branches for each channel
+
+      rawEvent = rawRun->getDet(ch); // If channel branch doesn't exist getDet calls addDet
+      rawEvent->clear();
+
+      // Set maximum tree size to 10Gb
+      rawEvent->channel = ch;
+      //rawEvent->eventTime = timeinfo;
+      rawEvent->trigger = EventInfo->EventCounter;
+      rawEvent->time = EventInfo->TriggerTimeTag;
+
+      wave.clear();
+      wave.resize(Size);
+
+      if (chan >= hChan.size()) {
+        TString hname;
+        TString htitle;
+        hname.Form("channel%i", ch);
+        htitle.Form("Channel %i", ch);
+        hChan.push_back(new TH1D(hname, htitle, Size, 1, Size));
+      }
+
+
+      for(j=0; j<Size; j++) {
+        if (WDcfg->Nbit == 8)
+          wave[j] = Event8->DataChannel[ch][j];
+        else  {
+          wave[j] = Event16->DataChannel[ch][j]; 
+        }
+        // Use baselines from the digitizer eventually 
+        hChan[chan]->AddBinContent(j + 1, double(wave[j]));
+      }
+      rawEvent->rdigi = wave;
+
+
+      /// End of fill root tree
+
+    } else {
+      // Check the file format type
+      if( WDcfg->OutFileFlags& OFF_BINARY) {
+        // Binary file format
+        uint32_t BinHeader[6];
+        BinHeader[0] = (WDcfg->Nbit == 8) ? Size + 6*sizeof(*BinHeader) : Size*2 + 6*sizeof(*BinHeader);
+        BinHeader[1] = EventInfo->BoardId;
+        BinHeader[2] = EventInfo->Pattern;
+        BinHeader[3] = ch;
+        BinHeader[4] = EventInfo->EventCounter;
+        BinHeader[5] = EventInfo->TriggerTimeTag;
+        if (!WDrun->fout[ch]) {
+          char fname[100];
+          sprintf(fname, "%swave%d.dat", path,ch);
+          if ((WDrun->fout[ch] = fopen(fname, "wb")) == NULL)
+            return -1;
+        }
+        if( WDcfg->OutFileFlags & OFF_HEADER) {
+          // Write the Channel Header
+          if(fwrite(BinHeader, sizeof(*BinHeader), 6, WDrun->fout[ch]) != 6) {
+            // error writing to file
+            fclose(WDrun->fout[ch]);
+            WDrun->fout[ch]= NULL;
+            return -1;
+          }
+        }
+        if (WDcfg->Nbit == 8)
+          ns = (int)fwrite(Event8->DataChannel[ch], 1, Size, WDrun->fout[ch]);
+        else
+          ns = (int)fwrite(Event16->DataChannel[ch] , 1 , Size*2, WDrun->fout[ch]) / 2;
+        if (ns != Size) {
+          // error writing to file
+          fclose(WDrun->fout[ch]);
+          WDrun->fout[ch]= NULL;
+          return -1;
+        }
+      } else {
+        // Ascii file format
+        if (!WDrun->fout[ch]) {
+          char fname[100];
+          sprintf(fname, "%swave%d.txt", path, ch);
+          if ((WDrun->fout[ch] = fopen(fname, "w")) == NULL)
+            return -1;
+        }
+        if( WDcfg->OutFileFlags & OFF_HEADER) {
+          // Write the Channel Header
+          fprintf(WDrun->fout[ch], "Record Length: %d\n", Size);
+          fprintf(WDrun->fout[ch], "BoardID: %2d\n", EventInfo->BoardId);
+          fprintf(WDrun->fout[ch], "Channel: %d\n", ch);
+          fprintf(WDrun->fout[ch], "Event Number: %d\n", EventInfo->EventCounter);
+          fprintf(WDrun->fout[ch], "Pattern: 0x%04X\n", EventInfo->Pattern & 0xFFFF);
+          fprintf(WDrun->fout[ch], "Trigger Time Stamp: %u\n", EventInfo->TriggerTimeTag);
+          fprintf(WDrun->fout[ch], "DC offset (DAC): 0x%04X\n", WDcfg->DCoffset[ch] & 0xFFFF);
+        }
+        for(j=0; j<Size; j++) {
+          if (WDcfg->Nbit == 8)
+            fprintf(WDrun->fout[ch], "%d\n", Event8->DataChannel[ch][j]);
+          else
+            fprintf(WDrun->fout[ch], "%d\n", Event16->DataChannel[ch][j]);
+        }
+      }
+      if (WDrun->SingleWrite) {
+        fclose(WDrun->fout[ch]);
+        WDrun->fout[ch]= NULL;
+      }
     }
-    return 0;
+    chan++;
+  }
+  if (WDrun->foutRoot) {
+    rawRun->fill();
+  }
+  return 0;
 
 }
 
 /*! \brief   Write the event data on x742 boards into the output files
-*
-*   \param   WDrun Pointer to the WaveDumpRun data structure
-*   \param   WDcfg Pointer to the WaveDumpConfig data structure
-*   \param   EventInfo Pointer to the EventInfo data structure
-*   \param   Event Pointer to the Event to write
-*/
+ *
+ *   \param   WDrun Pointer to the WaveDumpRun data structure
+ *   \param   WDcfg Pointer to the WaveDumpConfig data structure
+ *   \param   EventInfo Pointer to the EventInfo data structure
+ *   \param   Event Pointer to the Event to write
+ */
 int WriteOutputFilesx742(WaveDumpConfig_t *WDcfg, WaveDumpRun_t *WDrun, CAEN_DGTZ_EventInfo_t *EventInfo, CAEN_DGTZ_X742_EVENT_t *Event)
 {
     int gr,ch, j, ns;
