@@ -1550,7 +1550,7 @@ int WriteOutputFiles(WaveDumpConfig_t *WDcfg, WaveDumpRun_t *WDrun, CAEN_DGTZ_Ev
   char   hourTag[3];
   time_t rawtime;
   time ( &rawtime );
-  struct tm *timeinfo;
+  // event timestamp
   int chan = 0;
 
   CAEN_DGTZ_UINT16_EVENT_t  *Event16 = NULL;
@@ -1561,11 +1561,7 @@ int WriteOutputFiles(WaveDumpConfig_t *WDcfg, WaveDumpRun_t *WDrun, CAEN_DGTZ_Ev
   else
     Event16 = (CAEN_DGTZ_UINT16_EVENT_t *)Event;
 
-  // event timestamp
-  timeinfo = localtime (&rawtime );
-  TTimeStamp tstamp(mktime(timeinfo));
-
-  // open output file 
+   // open output file 
   if (!WDrun->foutRoot) {  // if no root file open, then open a new one as run-mm-dd-yyyy-file#.root
     strftime(dateTag, 11,"%m_%d_%Y",timeinfo);
     TString fullname = (Form("rootData/run-%s-file.root",dateTag));
@@ -1576,7 +1572,7 @@ int WriteOutputFiles(WaveDumpConfig_t *WDcfg, WaveDumpRun_t *WDrun, CAEN_DGTZ_Ev
     // rawRun->btree->SetAutoFlush(100);
   }
 
-  rawRun->updateTime(tstamp);
+  rawRun->updateTime(rawtime);
 
   // loop over channels
   for (ch = 0; ch < WDcfg->Nch; ch++) {
