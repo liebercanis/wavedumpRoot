@@ -1563,6 +1563,8 @@ int WriteOutputFiles(WaveDumpConfig_t *WDcfg, WaveDumpRun_t *WDrun, CAEN_DGTZ_Ev
 
    // open output file 
   if (!WDrun->foutRoot) {  // if no root file open, then open a new one as run-mm-dd-yyyy-file#.root
+    struct tm *timeinfo;
+    timeinfo = localtime ( &rawtime );
     strftime(dateTag, 11,"%m_%d_%Y",timeinfo);
     TString fullname = (Form("rootData/run-%s-file.root",dateTag));
     WDrun->foutRoot = new TFile(fullname, "recreate");
