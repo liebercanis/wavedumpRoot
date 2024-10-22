@@ -43,7 +43,6 @@
 #define DBG_TIME
 
 #include <numeric>
-
 #include <CAENDigitizer.h>
 #include "WaveDump.h"
 #include "WDconfig.h"
@@ -1791,6 +1790,7 @@ int WriteOutputFiles(WaveDumpConfig_t *WDcfg, WaveDumpRun_t *WDrun, CAEN_DGTZ_Ev
 
             rawEvent = rawRun->getDet(ch); // If channel branch doesn't exist getDet calls addDet
             rawEvent->clear();
+            rawRun->eventSummary->clear();
 
             // Set maximum tree size to 10Gb
             rawEvent->channel = ch;
