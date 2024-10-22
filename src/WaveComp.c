@@ -1838,7 +1838,10 @@ int WriteOutputFiles(WaveDumpConfig_t *WDcfg, WaveDumpRun_t *WDrun, CAEN_DGTZ_Ev
             rawRun->eventSummary->mean.push_back(mean);
             rawRun->eventSummary->rms.push_back(rms);
 
-            rawEvent->rdigi = wave;
+            // fill only values greater than 2 rms of the mean
+            for (unsigned idigi = 0; idigi < wave.size(); ++idigi)
+                if (abs(double(wave[idigi]) - mean) > 2. * rms)
+                    rawEvent->rdigi[idigi] = wave[idigi];
 
             /// End of fill root tree
         }
